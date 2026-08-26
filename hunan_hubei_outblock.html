@@ -1,0 +1,272 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>湖南湖北界外孤立商圈</title>
+    <script src="https://webapi.amap.com/maps?v=2.0&key=05274d5027e6b22978b2ade4630f3596"></script>
+    <style>
+        body { margin: 0; padding: 0; font-family: Arial, sans-serif; }
+        #container { width: 100%; height: 100vh; }
+        .tip-panel {
+            position: absolute; top: 10px; right: 10px;
+            background: rgba(255,255,255,0.95); padding: 14px 18px;
+            border-radius: 8px; box-shadow: 0 2px 12px rgba(0,0,0,0.15);
+            z-index: 1000; font-size: 13px; color: #444; line-height: 1.8;
+        }
+        .tip-panel .title { font-weight: bold; font-size: 14px; color: #333; margin-bottom: 6px; }
+        .tip-dot {
+            display: inline-block; width: 12px; height: 12px;
+            border-radius: 50%; margin-right: 6px; vertical-align: middle;
+            border: 1px solid rgba(0,0,0,0.15);
+        }
+        .filter-panel {
+            position: absolute; top: 10px; left: 10px;
+            background: rgba(255,255,255,0.95); padding: 14px 18px;
+            border-radius: 8px; box-shadow: 0 2px 12px rgba(0,0,0,0.15);
+            z-index: 1000; font-size: 13px; color: #444;
+        }
+        .filter-panel .title { font-weight: bold; font-size: 14px; color: #333; margin-bottom: 8px; }
+        .filter-panel select {
+            padding: 5px 8px; font-size: 13px; border: 1px solid #ccc;
+            border-radius: 4px; margin-right: 8px; min-width: 100px;
+            outline: none; cursor: pointer;
+        }
+        .filter-panel select:focus { border-color: #1E88E5; }
+        .filter-panel label { font-weight: bold; margin-right: 4px; }
+        .filter-row { margin-bottom: 6px; display: flex; align-items: center; }
+        .amap-info-content { font-size: 13px; line-height: 1.7; padding: 8px 12px; }
+        .amap-info-content .label { font-weight: bold; color: #333; }
+    </style>
+</head>
+<body>
+<div id="container"></div>
+
+<div class="filter-panel">
+    <div class="title">🔍 筛选</div>
+    <div class="filter-row">
+        <label>省份：</label>
+        <select id="provFilter"><option value="">全部省</option></select>
+    </div>
+    <div class="filter-row">
+        <label>城市：</label>
+        <select id="cityFilter"><option value="">全部市</option></select>
+    </div>
+</div>
+
+<div class="tip-panel">
+    <div class="title">💡 操作提示</div>
+    <div>点击六边形/圆点可查看详细信息</div>
+    <div style="margin-top:6px;">
+        <div><span class="tip-dot" style="background:#E53935;"></span>红色圆点：汉堡品牌POI</div>
+        <div><span class="tip-dot" style="background:#1E88E5;"></span>蓝色圆点：水系品牌POI</div>
+        <div><span class="tip-dot" style="background:#43A047;"></span>绿色圆点：零食品牌POI</div>
+    </div>
+</div>
+
+<script>
+    function waitForAMap(callback) {
+        if (typeof AMap !== 'undefined') {
+            callback();
+        } else {
+            setTimeout(function () { waitForAMap(callback); }, 100);
+        }
+    }
+
+    function loadData() {
+        var xhr = new XMLHttpRequest();
+        xhr.open('GET', 'temp_file/模型-下沉市场探索/hunan_hubei_outblock_info.json', true);
+        xhr.onreadystatechange = function () {
+            if (xhr.readyState === 4) {
+                if (xhr.status === 200 || xhr.status === 0) {
+                    var data = JSON.parse(xhr.responseText);
+                    initMap(data);
+                } else {
+                    console.error('加载JSON失败, status:', xhr.status);
+                }
+            }
+        };
+        xhr.onerror = function () { console.error('加载JSON网络错误'); };
+        xhr.send();
+    }
+
+    waitForAMap(loadData);
+
+    function initMap(data) {
+        var map = new AMap.Map('container', {
+            zoom: 7,
+            center: [111.5, 28.5],
+        });
+
+        var currentInfoWindow = null;
+        var allOverlays = [];
+
+        function showInfoWindow(position, content) {
+            if (currentInfoWindow) currentInfoWindow.close();
+            currentInfoWindow = new AMap.InfoWindow({
+                content: '<div class="amap-info-content">' + content + '</div>',
+                offset: new AMap.Pixel(0, -5),
+                isCustom: false
+            });
+            currentInfoWindow.open(map, position);
+        }
+
+        function getPolygonCenter(boundary) {
+            var lngSum = 0, latSum = 0;
+            boundary.forEach(function (p) { lngSum += p[0]; latSum += p[1]; });
+            return new AMap.LngLat(lngSum / boundary.length, latSum / boundary.length);
+        }
+
+        function getCatColor(bCat) {
+            if (bCat === 'burger') return '#E53935';
+            if (bCat === 'drink') return '#1E88E5';
+            if (bCat === 'market') return '#43A047';
+            return '#9E9E9E';
+        }
+
+        // 构建省市列表
+        var provSet = {};
+        var cityByProv = {};
+        data.forEach(function (item) {
+            provSet[item.prov] = true;
+            if (!cityByProv[item.prov]) cityByProv[item.prov] = {};
+            cityByProv[item.prov][item.city] = true;
+        });
+
+        var provFilter = document.getElementById('provFilter');
+        var cityFilter = document.getElementById('cityFilter');
+
+        Object.keys(provSet).sort().forEach(function (prov) {
+            var opt = document.createElement('option');
+            opt.value = prov; opt.textContent = prov;
+            provFilter.appendChild(opt);
+        });
+
+        function updateCityOptions() {
+            var selectedProv = provFilter.value;
+            cityFilter.innerHTML = '<option value="">全部市</option>';
+            var cities = {};
+            if (selectedProv) {
+                cities = cityByProv[selectedProv] || {};
+            } else {
+                Object.keys(cityByProv).forEach(function (prov) {
+                    Object.keys(cityByProv[prov]).forEach(function (c) { cities[c] = true; });
+                });
+            }
+            Object.keys(cities).sort().forEach(function (city) {
+                var opt = document.createElement('option');
+                opt.value = city; opt.textContent = city;
+                cityFilter.appendChild(opt);
+            });
+        }
+        updateCityOptions();
+
+        // 绘制所有数据
+        data.forEach(function (item) {
+            if (!item.boundary || item.boundary.length === 0) return;
+
+            var groupOverlays = [];
+
+            var polygon = new AMap.Polygon({
+                path: item.boundary,
+                fillColor: '#4FC3F7',
+                fillOpacity: 0.25,
+                strokeColor: '#0288D1',
+                strokeWeight: 2,
+                strokeOpacity: 0.8
+            });
+            groupOverlays.push(polygon);
+
+            polygon.on('click', function () {
+                var center = getPolygonCenter(item.boundary);
+                var content =
+                    '<p><span class="label">H3: </span>' + item.h3id + '</p>' +
+                    '<p><span class="label">省份: </span>' + item.prov + '</p>' +
+                    '<p><span class="label">城市: </span>' + item.city + '</p>' +
+                    '<p><span class="label">品牌类别数: </span>' + item['品牌类别数'] + '</p>' +
+                    '<p><span class="label">品牌POI数: </span>' + item['品牌poi数'] + '</p>';
+                showInfoWindow(center, content);
+            });
+            polygon.on('mouseover', function () {
+                polygon.setOptions({ fillOpacity: 0.45, strokeWeight: 3 });
+            });
+            polygon.on('mouseout', function () {
+                polygon.setOptions({ fillOpacity: 0.25, strokeWeight: 2 });
+            });
+
+            if (item.brand_poi && item.brand_poi.length > 0) {
+                item.brand_poi.forEach(function (poi) {
+                    var color = getCatColor(poi.b_cat);
+                    var marker = new AMap.CircleMarker({
+                        center: [parseFloat(poi.lon_02), parseFloat(poi.lat_02)],
+                        radius: 10,
+                        fillColor: color,
+                        fillOpacity: 0.85,
+                        strokeColor: '#fff',
+                        strokeWeight: 2,
+                        cursor: 'pointer',
+                        bubble: false
+                    });
+                    groupOverlays.push(marker);
+
+                    marker.on('click', function () {
+                        var pos = new AMap.LngLat(parseFloat(poi.lon_02), parseFloat(poi.lat_02));
+                        var content =
+                            '<p><span class="label">名称: </span>' + poi.name + '</p>'
+                        showInfoWindow(pos, content);
+                    });
+                });
+            }
+
+            allOverlays.push({
+                prov: item.prov,
+                city: item.city,
+                overlays: groupOverlays
+            });
+        });
+
+        // 初始全部添加到地图
+        allOverlays.forEach(function (g) { map.add(g.overlays); });
+
+        // 筛选逻辑
+        function applyFilter() {
+            var selectedProv = provFilter.value;
+            var selectedCity = cityFilter.value;
+            if (currentInfoWindow) { currentInfoWindow.close(); currentInfoWindow = null; }
+
+            var visibleOverlays = [];
+            allOverlays.forEach(function (g) {
+                var show = true;
+                if (selectedProv && g.prov !== selectedProv) show = false;
+                if (selectedCity && g.city !== selectedCity) show = false;
+
+                if (show) {
+                    map.add(g.overlays);
+                    visibleOverlays = visibleOverlays.concat(g.overlays);
+                } else {
+                    map.remove(g.overlays);
+                }
+            });
+
+            if (visibleOverlays.length > 0) {
+                map.setFitView(visibleOverlays);
+            }
+        }
+
+        provFilter.addEventListener('change', function () {
+            updateCityOptions();
+            applyFilter();
+        });
+        cityFilter.addEventListener('change', function () {
+            applyFilter();
+        });
+
+        map.on('click', function () {
+            if (currentInfoWindow) { currentInfoWindow.close(); currentInfoWindow = null; }
+        });
+
+        if (data.length > 0) map.setFitView();
+    }
+</script>
+</body>
+</html>
